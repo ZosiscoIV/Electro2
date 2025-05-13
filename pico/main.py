@@ -186,16 +186,22 @@ class Display:
         time.sleep_ms(3)
 
 def connect_wifi(ssid,password):
+    print("Initialisation du Wi-Fi...")
+
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
+    print("Tentative de connexion au réseau :", ssid)
+
     wlan.connect(ssid, password)
     while not wlan.isconnected():
         time.sleep(1)
+        print("Échec de la connexion : délai dépassé")
+
     print("Connecté au Wi-Fi :", wlan.ifconfig())
     return wlan
 
 def check_start_command():
-    url = "http://192.168.1.45:3000/api/commande"
+    url = "http://192.168.197.84:3000/api/commande"
     try:
         res = urequests.get(url)
         data = res.json()
@@ -206,7 +212,7 @@ def check_start_command():
         return False, "Test"
 
 def send_weight(name, weight):
-    url = "http://192.168.1.45:3000/api/poids"
+    url = "http://192.168.197.84:3000/api/poids"
     payload = {"name": name, "weight": weight}
     try:
         response = urequests.post(url, json=payload)
@@ -240,8 +246,8 @@ def main():
         should_start, product_name = check_start_command() 
         if should_start:
             print("Commande reçue, pesée en cours...")
-            #weight = round(abs(hx.read_long()), 1)
-            weight = 14.8
+            weight = round(abs(hx.read_long()), 1)
+            #weight = 14.8
             display.show_number(weight)
 
             send_weight(product_name, weight)
@@ -257,7 +263,7 @@ def main():
                 alarm_led.off()
             # Optionnel : informer que c’est fini
             try:
-                urequests.post("http://192.168.1.45:3000/api/commande", json={"start": False, "name": product_name})
+                urequests.post("http://192.168.197.84:3000/api/commande", json={"start": False, "name": product_name})
             except:
                 pass
 

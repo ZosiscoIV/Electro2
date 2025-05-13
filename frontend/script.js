@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 });*/
 async function chargerProduits() {
   try {
-    const res = await fetch("http://192.168.1.45:3000/api/produits");
+    const res = await fetch("http://192.168.197.84:3000/api/produits");
     const produits = await res.json();
     document.getElementById("tableBody").innerHTML = ""; 
     produits.forEach(p => table(p));
@@ -35,7 +35,7 @@ async function peser(){
     }
   
     try {
-      await fetch("http://192.168.1.45:3000/api/commande", {
+      await fetch("http://192.168.197.84:3000/api/commande", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
