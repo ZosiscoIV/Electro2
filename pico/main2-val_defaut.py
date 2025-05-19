@@ -3,6 +3,7 @@ import network
 import time
 import machine
 import math
+import _thread
 
 class HX711:
     def __init__(self, dout, pd_sck, gain=128):
@@ -221,9 +222,20 @@ def send_weight(name, weight):
     except Exception as e:
         print("Erreur lors de l'envoi :", e)
 
+
+current_weight = 14.8
+def display_loop(display):
+    global current_weight
+    point = machine.Pin(5, machine.Pin.OUT)
+    point.value(1)
+    while True:
+        display.show_number(current_weight)
+        time.sleep(0.01) 
+
 def main():
-    SSID = "Proximus-Home-9F10" # à remplir
-    PASSWORD = "wa439u92kr9uu"
+    global current_weight
+    SSID = ""
+    PASSWORD = ""
     connect_wifi(SSID, PASSWORD)
 
     hx = HX711(dout=16, pd_sck=17)
@@ -231,48 +243,53 @@ def main():
     hx.calibrate(6.0)
 
     display = Display(SEGMENT_PINS, DIGIT_PINS)
+
+    _thread.start_new_thread(display_loop, (display,))
+
     point = machine.Pin(5, machine.Pin.OUT)
     point.value(1)
-    
-    # Initialize alarm components
+
+    # Composants d'alarme
     buzzer = machine.Pin(14, machine.Pin.OUT)
     alarm_led = machine.Pin(15, machine.Pin.OUT)
 
-    # Nom en dur pour le test
-    #product_name = "Test"
+    already_sent = False  # Pour ne pas envoyer deux fois
+    current_command = None
 
     while True:
-        print("En attente de commande...")
-        should_start, product_name = check_start_command() 
-        if should_start:
+        # 1. Affiche en continu la valeur sur les afficheurs
+        current_weight = 20.8  # Valeur par défaut conservée
+
+        # 2. Vérifie s’il y a une nouvelle commande
+        should_start, product_name = check_start_command()
+
+        if should_start and not already_sent:
             print("Commande reçue, pesée en cours...")
-            envoi = False
-            while True: 
-                #weight = round(abs(hx.read_long()), 1)
-                weight = 14.8
-                display.show_number(weight)
-                if not envoi:
-                    send_weight(product_name, weight)
-                    envoi = True
-                    print(f"Le produit {product_name} est de poids : {weight}kg")
 
-                if weight > 20:
-                    # Sound buzzer and light LED
-                    buzzer.on()
-                    alarm_led.on()
-                    print("ALARM: Weight exceeds 20kg!")
-                else:
-                    # Turn off alarm
-                    buzzer.off()
-                    alarm_led.off()
-        # Optionnel : informer que c’est fini
-        try:
-            urequests.post("http://192.168.1.45:3000/api/commande", json={"start": False, "name": product_name})
-        except:
-            pass
+            send_weight(product_name, current_weight)
+            already_sent = True  # On bloque l'envoi suivant
+            print(f"Le produit {product_name} est de poids : {current_weight}kg")
             
+            # 3. Gestion alarme
+            if current_weight > 20:
+                buzzer.on()
+                alarm_led.on()
+                print("ALARM: Weight exceeds 20kg!")
+            else:
+                buzzer.off()
+                alarm_led.off()
 
-        time.sleep(2)
+            # 4. Optionnel : notifier que la commande est traitée
+            try:
+                urequests.post("http://192.168.1.45:3000/api/commande", json={"start": False, "name": product_name})
+            except Exception as e:
+                print("Erreur lors de la fin de commande :", e)
+
+        elif not should_start:
+            # Réinitialiser le flag pour détecter la prochaine commande
+            already_sent = False
+
+        time.sleep(2)  # Assez rapide pour l’affichage
 
 if __name__ == '__main__':
     main()

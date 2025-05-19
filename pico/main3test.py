@@ -3,6 +3,7 @@ import network
 import time
 import machine
 import math
+import _thread
 
 class HX711:
     def __init__(self, dout, pd_sck, gain=128):
@@ -37,9 +38,11 @@ class HX711:
             self.GAIN = 3
         elif gain == 32:
             self.GAIN = 2
+        else:
+            raise ValueError("Gain must be 128, 64, or 32")
         
         self.PD_SCK.off()
-        self.read_raw_bytes()
+        self.read_raw_bytes(timeout_ms=100)
 
     def read_next_bit(self):
         """Read the next bit from the HX711."""
@@ -49,74 +52,92 @@ class HX711:
 
     def read_next_byte(self):
         """Read a byte of data (8 bits) from the HX711."""
-        byte_value = 0
+        byte = 0
         for _ in range(8):
-            byte_value <<= 1
-            byte_value |= self.read_next_bit()
-        return byte_value 
+            byte = (byte << 1) | self.read_next_bit()
+        return byte 
 
-    def read_raw_bytes(self):
-        """Read 3 raw bytes from the HX711."""
-        print("Reading raw bytes")
-        print(f"DOUT value: {self.DOUT.value()}")
+    def read_raw_bytes(self, timeout_ms=1000):
+        """Read 3 bytes from HX711 with timeout."""
+        print("Reading raw bytes...")
+        start = time.ticks_ms()
         while not self.is_ready():
+            if time.ticks_diff(time.ticks_ms(), start) > timeout_ms:
+                print("Timeout waiting for HX711")
+                return None
 
-            pass
-        
-        first_byte = self.read_next_byte()
-        second_byte = self.read_next_byte()
-        third_byte = self.read_next_byte()
-        
+        byte1 = self.read_next_byte()
+        byte2 = self.read_next_byte()
+        byte3 = self.read_next_byte()
+
+        # Apply gain setting by generating extra clock pulses
         for _ in range(self.GAIN):
             self.read_next_bit()
-        
-        return [first_byte, second_byte, third_byte]
+
+        return [byte1, byte2, byte3]
 
     def read_long(self):
         """Read a 24-bit signed integer from the HX711."""
         print("Reading long value")
-        data_bytes = self.read_raw_bytes()
+        data = self.read_raw_bytes()
+        if data is None:
+            print("Failed to read from HX711.")
+            return None
         
-        # Combine the 3 bytes into one 24-bit value
-        combined_value = (data_bytes[0] << 16) | (data_bytes[1] << 8) | data_bytes[2]
-        
-        # Convert from two's complement
-        signed_value = self.convert_from_twos_complement(combined_value)
-        
-        # Calibration: Convert raw reading to kg
-        weight_kg = (signed_value - self.OFFSET) / self.REFERENCE_UNIT
-        
-        return weight_kg
+        value = (data[0] << 16) | (data[1] << 8) | data[2]
+        signed = self.convert_from_twos_complement(value)
+        weight = (signed - self.OFFSET) / self.REFERENCE_UNIT
+        return weight
 
     def set_offset(self, offset):
         """Set the offset for calibration."""
         print(f"Setting offset to {offset}")
         self.OFFSET = offset
 
-    def set_reference_unit(self, reference_unit):
+    def set_reference_unit(self, ref_unit):
         """Set the reference unit for calibration."""
-        print(f"Setting reference unit to {reference_unit}")
-        self.REFERENCE_UNIT = reference_unit
+        print(f"Setting reference unit to {ref_unit}")
+        if ref_unit == 0:
+            raise ValueError("Reference unit cannot be zero.")
+        self.REFERENCE_UNIT = ref_unit
 
     def tare(self, times=10):
-        """Tare the scale by averaging multiple readings with no weight."""
-        total = 0
+        """Tare (zero) the scale."""
+        print("Taring...")
+        readings = []
         for _ in range(times):
-            total += self.read_long()
+            value = self.read_long()
+            if value is not None:
+                readings.append(value)
             time.sleep_ms(100)
-        average = total / times
-        self.set_offset(average)
-        print(f"Tare complete, offset set to: {average}")
+        
+        if readings:
+            average = sum(readings) / len(readings)
+            self.set_offset(average)
+            print(f"Tare complete. Offset set to: {average}")
+        else:
+            print("Tare failed. No valid readings.")
 
     def calibrate(self, known_weight_kg, times=10):
         """Calibrate the scale with a known weight."""
-        print(f"Calibrating with {known_weight_kg}kg...")
+        print(f"Calibrating with known weight: {known_weight_kg} kg")
         self.tare(times)
-        raw = self.read_long()
-        reference_unit = raw / known_weight_kg  # Calculate the reference unit for the given weight
-        self.set_reference_unit(reference_unit)
-        print(f"Reference unit set to: {reference_unit}")
+        print("Place the known weight...")
+        time.sleep(2)  # Wait for user
+        readings = []
+        for _ in range(times):
+            value = self.read_long()
+            if value is not None:
+                readings.append(value)
+            time.sleep_ms(100)
 
+        if readings:
+            average = sum(readings) / len(readings)
+            reference_unit = average / known_weight_kg
+            self.set_reference_unit(reference_unit)
+            print(f"Calibration complete. Reference unit: {reference_unit}")
+        else:
+            print("Calibration failed. No valid readings.")
 
 # 7-Segment Display Pins (common cathode)
 SEGMENT_PINS = [27, 26, 22, 21, 20, 19, 18]
@@ -221,58 +242,83 @@ def send_weight(name, weight):
     except Exception as e:
         print("Erreur lors de l'envoi :", e)
 
+
+current_weight = 14.8
+def display_loop(display):
+    global current_weight
+    point = machine.Pin(5, machine.Pin.OUT)
+    point.value(1)
+    while True:
+        display.show_number(current_weight)
+        time.sleep(0.01) 
+
 def main():
-    SSID = "Proximus-Home-9F10" # à remplir
+    global current_weight
+    SSID = "Proximus-Home-9F10"
     PASSWORD = "wa439u92kr9uu"
     connect_wifi(SSID, PASSWORD)
 
     hx = HX711(dout=16, pd_sck=17)
     hx.tare()
-    hx.calibrate(6.0)
+    print("pose un objet à calibrer")
+    time.sleep(5)
+    hx.calibrate(1.4)
 
     display = Display(SEGMENT_PINS, DIGIT_PINS)
+
+    _thread.start_new_thread(display_loop, (display,))
+
     point = machine.Pin(5, machine.Pin.OUT)
     point.value(1)
-    
-    # Initialize alarm components
+
+    # Composants d'alarme
     buzzer = machine.Pin(14, machine.Pin.OUT)
     alarm_led = machine.Pin(15, machine.Pin.OUT)
 
-    # Nom en dur pour le test
-    #product_name = "Test"
+    already_sent = False  # Pour ne pas envoyer deux fois
 
     while True:
-        print("En attente de commande...")
-        should_start, product_name = check_start_command() 
-        if should_start:
-            print("Commande reçue, pesée en cours...")
-            envoi = False
-            while True: 
-                #weight = round(abs(hx.read_long()), 1)
-                weight = 14.8
-                display.show_number(weight)
-                if not envoi:
-                    send_weight(product_name, weight)
-                    envoi = True
-                    print(f"Le produit {product_name} est de poids : {weight}kg")
+        try:
 
-                if weight > 20:
-                    # Sound buzzer and light LED
+        # 1. Affiche en continu la valeur sur les afficheurs
+            weight = hx.read_long()
+            if weight is not None:
+                current_weight = round(weight, 1)
+            else:
+                print("Lecture échouée, conservation du dernier poids")
+            # 2. Vérifie s’il y a une nouvelle commande
+            should_start, product_name = check_start_command()
+
+            if should_start and not already_sent:
+                print("Commande reçue, pesée en cours...")
+
+                send_weight(product_name, current_weight)
+                already_sent = True  # On bloque l'envoi suivant
+                print(f"Le produit {product_name} est de poids : {current_weight}kg")
+                
+                # 3. Gestion alarme
+                if current_weight > 20:
                     buzzer.on()
                     alarm_led.on()
                     print("ALARM: Weight exceeds 20kg!")
                 else:
-                    # Turn off alarm
                     buzzer.off()
                     alarm_led.off()
-        # Optionnel : informer que c’est fini
-        try:
-            urequests.post("http://192.168.1.45:3000/api/commande", json={"start": False, "name": product_name})
-        except:
-            pass
-            
 
-        time.sleep(2)
+                # 4. Optionnel : notifier que la commande est traitée
+                try:
+                    urequests.post("http://192.168.1.45:3000/api/commande/reset", json={"start": False, "name": product_name})
+                except Exception as e:
+                    print("Erreur lors de la fin de commande :", e)
+
+            elif not should_start:
+                # Réinitialiser le flag pour détecter la prochaine commande
+                already_sent = False
+
+            time.sleep(2)  # Assez rapide pour l’affichage
+        
+        except Exception as e:
+            print("Erreur boucle principale : ", e)
 
 if __name__ == '__main__':
     main()
