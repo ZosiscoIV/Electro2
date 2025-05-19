@@ -226,9 +226,9 @@ def main():
     PASSWORD = ""
     connect_wifi(SSID, PASSWORD)
 
-    hx = HX711(dout=16, pd_sck=17)
+    hx = HX711(dout=14, pd_sck=15)
     hx.tare()
-    hx.calibrate(1.0)
+    hx.calibrate(6.0)
 
     display = Display(SEGMENT_PINS, DIGIT_PINS)
     point = machine.Pin(5, machine.Pin.OUT)
@@ -266,6 +266,7 @@ def main():
                 urequests.post("http://192.168.197.84:3000/api/commande", json={"start": False, "name": product_name})
             except:
                 pass
+            
 
         time.sleep(2)
 

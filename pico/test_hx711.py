@@ -1,34 +1,39 @@
 from machine import Pin
 from hx711 import *
+import time
 
-# 1. initalise the hx711 with pin 14 as clock pin, pin
-# 15 as data pin
+# Initialisation HX711
 hx = hx711(Pin(14), Pin(15))
-
-# 2. power up
 hx.set_power(hx711.power.pwr_up)
-
-# 3. [OPTIONAL] set gain and save it to the hx711
-# chip by powering down then back up
 hx.set_gain(hx711.gain.gain_128)
 hx.set_power(hx711.power.pwr_down)
 hx711.wait_power_down()
 hx.set_power(hx711.power.pwr_up)
+hx711.wait_settle(hx711.rate.rate_80)
 
-# 4. wait for readings to settle
-hx711.wait_settle(hx711.rate.rate_10)
+# 💡 Calibration
+zero = 1572863
+conversion = -262.144
 
-# 5. read values
+# Moyenne de plusieurs mesures
+def lire_poids(n=5):
+    valeurs = []
+    for _ in range(n):
+        if val := hx.get_value_timeout(250000):
+            valeurs.append(val)
+        time.sleep(0.05)
+    if valeurs:
+        moyenne = sum(valeurs) / len(valeurs)
+        poids = (moyenne - zero) / conversion
+        return round(poids, 1)
+    else:
+        return None
 
-# wait (block) until a value is read
-val = hx.get_value()
-
-# or use a timeout
-if val := hx.get_value_timeout(250000):
-    # value was obtained within the timeout period
-    # in this case, within 250 milliseconds
-    print(val)
-
-# or see if there's a value, but don't block if not
-if val := hx.get_value_noblock():
-    print(val)
+# Boucle principale
+while True:
+    poids = lire_poids()
+    if poids is not None:
+        print("Poids:", poids, "g")
+    else:
+        print("Lecture échouée")
+    time.sleep(1)
